@@ -1,7 +1,6 @@
 #Camerons Crump & Other Monday Report Automation
 
 #  %%
-import BQSAAuth as BQA
 import RepAutoGmail as RAGA  # Import your Gmail authentication module
 from Fix_defaultColWidthPt import XLSXFixer
 import os
@@ -32,9 +31,8 @@ import tempfile
 # win32.gencache.EnsureDispatch('Excel.Application')
 # excel = win32.Dispatch('Excel.Application')
 gservice = RAGA.confirm_auth()
-client = BQA.client
 
-SAVE_DIRECTORY = "C:\\Users\\Aidan\\Desktop\\Working\\Python Outputs\\Cameron\\Other"
+SAVE_DIRECTORY = "C:\\Users\\Esteban\\Desktop\\Working\\Python Outputs\\Malissa"
 
 
 def clear_save_directory(directory):
@@ -377,8 +375,8 @@ def main():
     # "martin@tortintakeprofessionals.com",
     "mclark@tortintakeprofessionals.com",
     # "oroman@tortintakeprofessionals.com",
-    "pjerome@tortintakeprofessionals.com"
-    # "esteban@tortintakeprofessionals.com",
+    "pjerome@tortintakeprofessionals.com",
+    "esteban@tortintakeprofessionals.com"
     # "brittany@tortintakeprofessionals.com",
     # "jackson@tortintakeprofessionals.com"
     ]  # Add recipient emails

@@ -1,7 +1,6 @@
 #Andy&Gregs Monday Report Automation
 
 #  %%
-import BQSAAuth as BQA
 import RepAutoGmail as RAGA  # Import your Gmail authentication module
 from Fix_defaultColWidthPt import XLSXFixer
 import os
@@ -25,9 +24,8 @@ import shutil
 # win32.gencache.EnsureDispatch('Excel.Application')
 excel = win32.Dispatch('Excel.Application')
 gservice = RAGA.confirm_auth()
-client = BQA.client
 
-SAVE_DIRECTORY = "C:\\Users\\Aidan\\Desktop\\Working\\Python Outputs\\Andy & Greg"
+SAVE_DIRECTORY = "C:\\Users\\Esteban\\Desktop\\Working\\Python Outputs\\Andy & Greg"
 
 
 def clear_save_directory(directory):
@@ -475,7 +473,7 @@ def main():
     "martin@tortintakeprofessionals.com",
     "oroman@tortintakeprofessionals.com",
     "pjerome@tortintakeprofessionals.com",
-    # "esteban@tortintakeprofessionals.com",
+    "esteban@tortintakeprofessionals.com",
     # "brittany@tortintakeprofessionals.com",
     # "jackson@tortintakeprofessionals.com",
     "ngaston@tortintakeprofessionals.com",
@@ -532,4 +530,4 @@ if __name__ == "__main__":
 
 # if you get this error:
 # AttributeError: module 'win32com.gen_py.00020813-0000-0000-C000-000000000046x0x1x9' has no attribute 'CLSIDToClassMap'
-# goto this folder and delete the folder: C:\Users\Aidan\AppData\Local\Temp\gen_py
+# goto this folder and delete the folder: C:\Users\Esteban\AppData\Local\Temp\gen_py

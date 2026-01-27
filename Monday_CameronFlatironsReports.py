@@ -1,4 +1,3 @@
-import BQSAAuth as BQA
 import RepAutoGmail as RAGA  # Import your Gmail authentication module
 import os
 import time
@@ -22,9 +21,8 @@ import shutil
 # win32.gencache.EnsureDispatch('Excel.Application')
 excel = win32.Dispatch('Excel.Application')
 gservice = RAGA.confirm_auth()
-client = BQA.client
 
-SAVE_DIRECTORY = "C:\\Users\\Aidan\\Desktop\\Working\\Python Outputs\\Cameron\\Flatirons"
+SAVE_DIRECTORY = "C:\\Users\\Esteban\\Desktop\\Working\\Python Outputs\\Cameron\\Flatirons"
 
 def clear_save_directory(directory):
     """
