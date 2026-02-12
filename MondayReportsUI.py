@@ -121,8 +121,8 @@ class UnifiedReportSenderUI:
         
         # Create StringVar after root window exists
         self.status_var = StringVar(value="Ready to send reports")
-        self.send_email_var = BooleanVar(value=True)  # Email checkbox (default ON)
-        self.upload_drive_var = BooleanVar(value=False)  # Drive upload checkbox (default OFF)
+        self.send_email_var = BooleanVar(value=False)  # Email checkbox (default OFF)
+        self.upload_drive_var = BooleanVar(value=True)  # Drive upload checkbox (default ON)
         
         self.setup_ui()
         
