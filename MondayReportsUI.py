@@ -113,7 +113,7 @@ class UnifiedReportSenderUI:
         # Create main window
         self.root = ttk.Window(themename="darkly")
         self.root.title("Monday Reports - Universal Sender")
-        self.root.geometry("700x800")
+        self.root.geometry("700x850")  # Increased height for Drive checkbox
         
         # Configure grid weights
         self.root.columnconfigure(0, weight=1)
@@ -121,6 +121,8 @@ class UnifiedReportSenderUI:
         
         # Create StringVar after root window exists
         self.status_var = StringVar(value="Ready to send reports")
+        self.send_email_var = BooleanVar(value=True)  # Email checkbox (default ON)
+        self.upload_drive_var = BooleanVar(value=False)  # Drive upload checkbox (default OFF)
         
         self.setup_ui()
         
@@ -237,6 +239,44 @@ class UnifiedReportSenderUI:
         canvas.grid(row=0, column=0, sticky="nsew")
         scrollbar.grid(row=0, column=1, sticky="ns")
         
+        # Delivery Options Section
+        delivery_frame = ttk.LabelFrame(
+            self.root, 
+            text="📬 Delivery Options"
+        )
+        delivery_frame.grid(row=2, column=0, sticky="ew", padx=10, pady=(10, 0))
+        
+        # Inner frame for padding
+        delivery_inner = ttk.Frame(delivery_frame)
+        delivery_inner.pack(fill="both", expand=True, padx=20, pady=10)
+        
+        # Email checkbox
+        email_checkbox = ttk.Checkbutton(
+            delivery_inner,
+            text="📧 Send via Email",
+            variable=self.send_email_var,
+            bootstyle="primary-round-toggle"
+        )
+        email_checkbox.pack(anchor="w", pady=2)
+        
+        # Drive checkbox
+        drive_checkbox = ttk.Checkbutton(
+            delivery_inner,
+            text="📤 Upload to Google Drive",
+            variable=self.upload_drive_var,
+            bootstyle="success-round-toggle"
+        )
+        drive_checkbox.pack(anchor="w", pady=2)
+        
+        # Help text
+        delivery_help = ttk.Label(
+            delivery_inner,
+            text="Select one or both delivery methods. Configure Drive folder IDs in DriveUploader.py",
+            font=("Segoe UI", 8),
+            bootstyle="secondary"
+        )
+        delivery_help.pack(anchor="w", pady=(5, 0))
+        
         # Status bar (StringVar already created in __init__)
         self.status_label = ttk.Label(
             self.root,
@@ -245,11 +285,11 @@ class UnifiedReportSenderUI:
             bootstyle="inverse-secondary",
             padding=10
         )
-        self.status_label.grid(row=2, column=0, sticky="ew", padx=10, pady=(0, 5))
+        self.status_label.grid(row=3, column=0, sticky="ew", padx=10, pady=(0, 5))
         
         # Buttons frame
         button_frame = ttk.Frame(self.root, padding=10)
-        button_frame.grid(row=3, column=0, sticky="ew", padx=10, pady=10)
+        button_frame.grid(row=4, column=0, sticky="ew", padx=10, pady=10)
         
         # Select/Deselect All buttons for recipients
         select_all_btn = ttk.Button(
@@ -384,18 +424,38 @@ class UnifiedReportSenderUI:
         # Get selected emails
         selected_emails = [email for email, var in self.email_vars.items() if var.get()]
         
-        if not selected_emails:
+        # Check delivery options
+        send_email = self.send_email_var.get()
+        upload_drive = self.upload_drive_var.get()
+        
+        if not send_email and not upload_drive:
             messagebox.showwarning(
-                "No Recipients",
-                "Please select at least one recipient."
+                "No Delivery Method",
+                "Please select at least one delivery method (Email or Drive)."
             )
             return
+        
+        if send_email and not selected_emails:
+            messagebox.showwarning(
+                "No Recipients",
+                "Please select at least one recipient when sending email."
+            )
+            return
+        
+        # Build delivery method text
+        delivery_methods = []
+        if send_email:
+            delivery_methods.append("Email")
+        if upload_drive:
+            delivery_methods.append("Google Drive")
+        delivery_text = " and ".join(delivery_methods)
         
         # Confirm send
         total_reports = sum(self.report_configs[name]["count"] for name in selected_reports)
         confirm = messagebox.askyesno(
-            "Confirm Send",
-            f"Send {len(selected_reports)} report type(s) ({total_reports} total reports) to {len(selected_emails)} recipient(s)?\n\n"
+            "Confirm Processing",
+            f"Process {len(selected_reports)} report type(s) ({total_reports} total reports) to {len(selected_emails)} recipient(s)?\n\n"
+            f"Delivery: {delivery_text}\n\n"
             f"Reports:\n" + "\n".join(f"  • {name}" for name in selected_reports) + "\n\n"
             f"Recipients:\n" + "\n".join(f"  • {email}" for email in selected_emails)
         )
@@ -407,11 +467,11 @@ class UnifiedReportSenderUI:
             # Run in thread with all selected reports
             thread = threading.Thread(
                 target=self.run_all_processes,
-                args=(selected_reports, selected_emails)
+                args=(selected_reports, selected_emails, send_email, upload_drive)
             )
             thread.start()
     
-    def run_all_processes(self, selected_reports, selected_emails):
+    def run_all_processes(self, selected_reports, selected_emails, send_email=True, upload_to_drive=False):
         """Run multiple report processes sequentially in a separate thread"""
         try:
             for idx, report_name in enumerate(selected_reports, 1):
@@ -422,8 +482,13 @@ class UnifiedReportSenderUI:
                 config = self.report_configs[report_name]
                 module = config["module"]
                 
-                # Run this report's main function
-                module.main(to_emails=selected_emails, status_callback=self.status_callback)
+                # Run this report's main function with delivery options
+                module.main(
+                    to_emails=selected_emails, 
+                    status_callback=self.status_callback,
+                    send_email=send_email,
+                    upload_to_drive=upload_to_drive
+                )
                 
                 print(f"✓ Completed: {report_name}")
             

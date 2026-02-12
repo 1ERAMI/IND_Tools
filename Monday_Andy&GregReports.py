@@ -3,6 +3,7 @@
 #  %%
 import RepAutoGmail as RAGA  # Import your Gmail authentication module
 from Fix_defaultColWidthPt import XLSXFixer
+from DriveUploader import upload_folder_to_drive
 import os
 import time
 import re
@@ -541,13 +542,15 @@ def send_email_with_attachments(gservice, to_emails, subject, body, attachment_f
 
 
 # Main function
-def main(to_emails=None, status_callback=None):
+def main(to_emails=None, status_callback=None, send_email=True, upload_to_drive=False):
     """
     Main function to execute the script for multiple reports and send an email with the processed files.
     
     Args:
         to_emails: List of email addresses to send to (optional)
         status_callback: Function to call with status updates (optional)
+        send_email: Send processed files via email (optional, default True)
+        upload_to_drive: Upload processed files to Google Drive (optional, default False)
     """
 
 
@@ -773,16 +776,35 @@ def main(to_emails=None, status_callback=None):
         print("-" * 50)
 
     # Send an email with all processed files
-    try:
-        status_msg = "Sending email with attachments..."
-        print(status_msg)
-        if status_callback:
-            status_callback(status_msg)
-        send_email_with_attachments(gservice, to_emails, email_subject, email_body, attachment_folder)
-    except Exception as e:
-        print(f"Error sending email: {e}")
+    if send_email:
+        try:
+            status_msg = "Sending email with attachments..."
+            print(status_msg)
+            if status_callback:
+                status_callback(status_msg)
+            send_email_with_attachments(gservice, to_emails, email_subject, email_body, attachment_folder)
+            print("Email sent successfully!")
+        except Exception as e:
+            print(f"Error sending email: {e}")
+    else:
+        print("Skipping email (send_email=False)")
 
-    print("All reports processed and email sent successfully.")
+    # Upload to Google Drive if requested
+    if upload_to_drive:
+        try:
+            upload_msg = "Uploading files to Google Drive..."
+            print(upload_msg)
+            if status_callback:
+                status_callback(upload_msg)
+            upload_folder_to_drive(attachment_folder, "Andy & Greg", status_callback)
+            print("Files uploaded to Google Drive successfully!")
+        except Exception as e:
+            error_msg = f"Error uploading to Drive: {e}"
+            print(error_msg)
+            if status_callback:
+                status_callback(error_msg)
+
+    print("All reports processed successfully.")
 
 def launch_ui():
     """Launch the UI for email selection"""
