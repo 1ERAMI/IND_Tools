@@ -9,6 +9,7 @@ This project automates the weekly Monday reports workflow by:
 2. **Downloading** Excel file attachments
 3. **Processing** the Excel files (formatting, pivot tables, etc.)
 4. **Sending** the processed files via email to designated recipients
+5. **Uploading** reports to Google Drive with automatic date-based organization
 
 ---
 
@@ -22,6 +23,8 @@ python MondayReportsUI.py
 **Features:**
 - ✅ Select multiple report types (runs sequentially)
 - ✅ Choose recipients with checkboxes
+- ✅ Email and/or Google Drive delivery
+- ✅ Automatic date-based folder organization in Drive
 - ✅ Modern dark-themed interface
 - ✅ Live progress updates
 
@@ -45,10 +48,13 @@ IND_Tools/
 ├── Monday_MalissaReports.py            # Malissa's reports (23 reports)
 ├── Monday_CamCrumpReports.py           # Cameron & Crump reports (3 reports)
 ├── Monday_CameronFlatironsReports.py   # Cameron Flatirons reports (56 reports)
+├── DriveUploader.py                    # 🆕 Google Drive upload module
 ├── RepAutoGmail.py                     # Gmail API authentication module
 ├── Fix_defaultColWidthPt.py            # Excel column width fixer module
+├── DRIVE_SETUP.md                      # 🆕 Google Drive setup guide
 ├── credentials.json                    # Google API OAuth credentials
-├── token.pickle                        # Cached authentication token
+├── token.pickle                        # Cached Gmail authentication token
+├── token_drive.pickle                  # Cached Drive authentication token
 ├── requirements.txt                    # Python dependencies
 └── __pycache__/                        # Python cache files
 ```
@@ -70,9 +76,9 @@ pip install -r requirements.txt
 ```
 
 **Key packages:**
-- `google-auth-oauthlib` - Gmail OAuth authentication
+- `google-auth-oauthlib` - Gmail & Drive OAuth authentication
 - `google-auth-httplib2` - HTTP library for Google API
-- `google-api-python-client` - Gmail API client
+- `google-api-python-client` - Gmail & Drive API client
 - `pandas` - Data manipulation
 - `openpyxl` - Excel file handling
 - `pywin32` - Windows COM automation for Excel
@@ -84,6 +90,35 @@ Already configured with `credentials.json`. On first run, the script will:
 1. Open a browser window for Gmail authentication
 2. Ask you to grant permissions (read, modify, send emails)
 3. Save authentication token to `token.pickle` for future runs
+
+### 4. Google Drive Setup (Optional)
+
+For automatic Drive uploads with date-based organization:
+
+1. **Enable Google Drive API** in your Google Cloud Console project
+2. **First upload attempt** will open browser for Drive authentication
+3. Grant Drive permissions to the app
+4. Authentication saves to `token_drive.pickle`
+
+**Drive Folder Structure:**
+```
+Monday Reports Test (Shared Drive)/
+├── Andy & Greg/
+│   ├── 2026-02-09/
+│   │   ├── Report_1.xlsx
+│   │   └── Report_2.xlsx
+│   └── 2026-02-16/
+├── Cameron Flatirons/
+│   └── 2026-02-09/
+├── Cameron & Crump/
+│   └── 2026-02-09/
+└── Malissa/
+    └── 2026-02-09/
+```
+
+Reports are automatically organized into date subfolders (extracted from filenames).
+
+See [DRIVE_SETUP.md](DRIVE_SETUP.md) for detailed configuration.
 
 ---
 
@@ -233,6 +268,45 @@ confirm_auth() -> service
 
 ---
 
+### DriveUploader.py
+
+**Purpose:** Handles Google Drive uploads with automatic date-based organization
+
+**Key Functions:**
+```python
+get_drive_service() -> service
+# Authenticates with Google Drive API
+# Returns authenticated Drive service object
+
+upload_folder_to_drive(folder_path, folder_name, status_callback)
+# Uploads all .xlsx files from local folder to Drive
+# Automatically creates date subfolders (e.g., "2026-02-09")
+# Returns count of successfully uploaded files
+
+upload_file_to_drive(file_path, folder_name, status_callback, target_folder_id)
+# Uploads single file to Drive folder
+# Supports shared drives with supportsAllDrives=True
+```
+
+**Features:**
+- Extracts date from filename using regex (`YYYY-MM-DD` format)
+- Creates or reuses date subfolders automatically
+- Supports Google Shared Drives
+- Configurable folder mappings in `DRIVE_FOLDERS` dictionary
+- Status callbacks for UI integration
+
+**Configuration:**
+```python
+DRIVE_FOLDERS = {
+    "Andy & Greg": "1qOnyoZl_lbWkUGk8r6iMroy8ZTKom91E",
+    "Cameron Flatirons": "11V0Ity9HLncxsOkS-yedctUWRO6oiLFF",
+    "Cameron & Crump": "1GHYmpl983zq264sZnYj-iR-M_1-w-5LJ",
+    "Malissa": "1FroHjovKsopPtRTlr_LPwai7y4isX-DY"
+}
+```
+
+---
+
 ### Fix_defaultColWidthPt.py
 
 **Purpose:** Fixes Excel column width formatting issues
@@ -272,11 +346,18 @@ XLSXFixer.fix_default_col_width(file_path)
    - Auto-adjusts column widths
    - Reorders sheets (data sheet first, then pivot tables)
 
-4. **Send Email**
+4. **Send Email (Optional)**
    - Collects all processed .xlsx files from output directory
    - Creates email with all files attached
    - Sends to designated recipients
    - Prints success/failure message
+
+5. **Upload to Drive (Optional)**
+   - Uploads processed files to Google Drive
+   - Extracts date from filename (e.g., `2026-02-09`)
+   - Creates date subfolder if it doesn't exist
+   - Uploads all files to date subfolder
+   - Supports both email and Drive or either one
 
 ---
 
@@ -413,10 +494,12 @@ while True:
 ## 🔒 Security Notes
 
 - `credentials.json` contains OAuth client secrets
-- `token.pickle` contains authentication tokens
+- `token.pickle` contains Gmail authentication token
+- `token_drive.pickle` contains Drive authentication token
 - **DO NOT** commit these files to public repositories
 - Keep credentials secure and rotate periodically
 - Use service accounts for production environments
+- Drive folders use shared drive for multi-user access
 
 ---
 
@@ -467,6 +550,9 @@ For issues or questions:
 
 ## 🎯 Future Enhancements
 
+- [x] ✅ Google Drive upload integration
+- [x] ✅ Date-based folder organization
+- [x] ✅ Optional email (Drive-only mode)
 - [ ] Add error logging to file
 - [ ] Create summary report of processed files
 - [ ] Add retry logic for failed downloads
@@ -478,5 +564,5 @@ For issues or questions:
 
 ---
 
-*Last Updated: January 26, 2026*  
+*Last Updated: February 12, 2026*  
 *Maintained by: Esteban*
