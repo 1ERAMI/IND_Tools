@@ -15,14 +15,39 @@ from base64 import urlsafe_b64decode
 from openpyxl import load_workbook
 from openpyxl.worksheet.table import Table, TableStyleInfo
 import win32com.client as win32
+import pythoncom
 from Fix_defaultColWidthPt import XLSXFixer
 import shutil
+from datetime import datetime, timedelta
+import ttkbootstrap as ttk
+from ttkbootstrap.constants import *
+from tkinter import StringVar, BooleanVar, messagebox
+import threading
+import traceback
 
 # win32.gencache.EnsureDispatch('Excel.Application')
 excel = win32.Dispatch('Excel.Application')
 gservice = RAGA.confirm_auth()
 
 SAVE_DIRECTORY = "C:\\Users\\Esteban\\Desktop\\Working\\Python Outputs\\Cameron\\Flatirons"
+
+
+def get_target_date():
+    """
+    Get today's date if it's Monday, otherwise get the most recent Monday.
+    Returns date in YYYY/MM/DD format for Gmail query.
+    """
+    today = datetime.now().date()
+    weekday = today.weekday()  # 0 = Monday, 6 = Sunday
+
+    if weekday == 0:  # Today is Monday
+        target_date = today
+    else:  # Calculate most recent Monday
+        days_since_monday = weekday
+        target_date = today - timedelta(days=days_since_monday)
+
+    return target_date.strftime("%Y/%m/%d")
+
 
 def clear_save_directory(directory):
     """
@@ -42,7 +67,9 @@ def sanitize_filename(filename):
 
 # Function to retrieve email and download the attachment
 def get_report_email(gservice, subject_filter):
-    query = f"subject:\"{subject_filter}\" is:unread"
+    target_date = get_target_date()
+    query = f"subject:\"{subject_filter}\" after:{target_date}"
+    print(f"Searching for emails after {target_date}")
     results = gservice.users().messages().list(userId="me", q=query).execute()
     messages = results.get("messages", [])
 
@@ -72,13 +99,6 @@ def get_report_email(gservice, subject_filter):
                     with open(file_path, "wb") as f:
                         f.write(file_data)
                     print(f"File downloaded: {file_path}")
-
-                    # Mark the email as read
-                    gservice.users().messages().modify(
-                        userId="me",
-                        id=message["id"],
-                        body={"removeLabelIds": ["UNREAD"]},
-                    ).execute()
                     return file_path
 
     print("No attachments found.")
@@ -155,7 +175,11 @@ def rename_sheet(file_path, old_name, new_name):
 
 # Create Excel pivot tables
 def create_multiple_pivot_tables(file_path, data_sheet_name, pivot_sheet_names):
+    excel = None
     try:
+        # Initialize COM for this thread
+        pythoncom.CoInitialize()
+
         excel = win32.gencache.EnsureDispatch("Excel.Application")
         excel.Visible = False
         wb = excel.Workbooks.Open(os.path.abspath(file_path))
@@ -194,8 +218,10 @@ def create_multiple_pivot_tables(file_path, data_sheet_name, pivot_sheet_names):
         print(f"Error creating pivot tables: {e}")
 
     finally:
-        if "excel" in locals():
+        if excel is not None:
             excel.Quit()
+        # Uninitialize COM
+        pythoncom.CoUninitialize()
 
 # Format and reorder sheets
 def format_and_reorder_sheets(file_path, sheet_order):
@@ -205,7 +231,11 @@ def format_and_reorder_sheets(file_path, sheet_order):
     :param file_path: Path to the Excel file.
     :param sheet_order: List of sheet names in the desired order.
     """
+    excel = None
     try:
+        # Initialize COM for this thread
+        pythoncom.CoInitialize()
+
         excel = win32.gencache.EnsureDispatch("Excel.Application")
         excel.Visible = False
         print(f"Opening workbook for formatting and reordering: {file_path}")
@@ -246,8 +276,234 @@ def format_and_reorder_sheets(file_path, sheet_order):
     except Exception as e:
         print(f"Error during formatting and reordering: {e}")
     finally:
-        if "excel" in locals():
+        if excel is not None:
             excel.Quit()
+        # Uninitialize COM
+        pythoncom.CoUninitialize()
+
+
+class EmailSenderUI:
+    """Modern UI for selecting email recipients and sending reports"""
+    
+    def __init__(self, available_emails, subject_filters):
+        self.available_emails = available_emails
+        self.subject_filters = subject_filters
+        self.selected_emails = []
+        self.email_vars = {}
+        
+        # Create main window
+        self.root = ttk.Window(themename="darkly")
+        self.root.title("Monday Reports - Email Sender")
+        self.root.geometry("600x700")
+        
+        # Configure grid weights
+        self.root.columnconfigure(0, weight=1)
+        self.root.rowconfigure(1, weight=1)
+        
+        self.setup_ui()
+        
+    def setup_ui(self):
+        """Setup the UI components"""
+        
+        # Header
+        header_frame = ttk.Frame(self.root, padding=20)
+        header_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=10)
+        
+        title_label = ttk.Label(
+            header_frame,
+            text="📧 Cameron Flatirons Reports Sender",
+            font=("Segoe UI", 18, "bold"),
+            bootstyle="inverse-primary"
+        )
+        title_label.pack()
+        
+        subtitle_label = ttk.Label(
+            header_frame,
+            text="Select recipients and send processed reports",
+            font=("Segoe UI", 10)
+        )
+        subtitle_label.pack(pady=(5, 0))
+        
+        # Main content area with scrollbar
+        content_frame = ttk.Frame(self.root)
+        content_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
+        content_frame.columnconfigure(0, weight=1)
+        content_frame.rowconfigure(0, weight=1)
+        
+        # Canvas and scrollbar for email list
+        canvas = ttk.Canvas(content_frame)
+        scrollbar = ttk.Scrollbar(content_frame, orient="vertical", command=canvas.yview, bootstyle="primary-round")
+        scrollable_frame = ttk.Frame(canvas)
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        # Email selection section
+        email_label = ttk.Label(
+            scrollable_frame,
+            text="📬 Available Recipients:",
+            font=("Segoe UI", 12, "bold"),
+            bootstyle="info"
+        )
+        email_label.pack(anchor="w", padx=20, pady=(10, 5))
+        
+        # Create checkboxes for each email
+        for email in self.available_emails:
+            var = BooleanVar(value=False)
+            self.email_vars[email] = var
+            
+            cb_frame = ttk.Frame(scrollable_frame)
+            cb_frame.pack(fill="x", padx=30, pady=2)
+            
+            cb = ttk.Checkbutton(
+                cb_frame,
+                text=email,
+                variable=var,
+                bootstyle="primary-round-toggle"
+            )
+            cb.pack(anchor="w")
+        
+        # Separator
+        sep = ttk.Separator(scrollable_frame, bootstyle="secondary")
+        sep.pack(fill="x", padx=20, pady=15)
+        
+        # Reports section
+        reports_label = ttk.Label(
+            scrollable_frame,
+            text="📊 Reports to Process:",
+            font=("Segoe UI", 12, "bold"),
+            bootstyle="info"
+        )
+        reports_label.pack(anchor="w", padx=20, pady=(5, 5))
+        
+        # Show count of reports
+        count_label = ttk.Label(
+            scrollable_frame,
+            text=f"{len(self.subject_filters)} reports configured",
+            font=("Segoe UI", 9)
+        )
+        count_label.pack(anchor="w", padx=30, pady=(0, 10))
+        
+        # Pack canvas and scrollbar
+        canvas.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        
+        # Status bar
+        self.status_var = StringVar(value="Ready to send reports")
+        self.status_label = ttk.Label(
+            self.root,
+            textvariable=self.status_var,
+            font=("Segoe UI", 9),
+            bootstyle="inverse-secondary",
+            padding=10
+        )
+        self.status_label.grid(row=2, column=0, sticky="ew", padx=10, pady=(0, 5))
+        
+        # Buttons frame
+        button_frame = ttk.Frame(self.root, padding=10)
+        button_frame.grid(row=3, column=0, sticky="ew", padx=10, pady=10)
+        
+        # Select/Deselect All buttons
+        select_all_btn = ttk.Button(
+            button_frame,
+            text="✓ Select All",
+            command=self.select_all,
+            bootstyle="info-outline",
+            width=15
+        )
+        select_all_btn.pack(side="left", padx=5)
+        
+        deselect_all_btn = ttk.Button(
+            button_frame,
+            text="✗ Deselect All",
+            command=self.deselect_all,
+            bootstyle="secondary-outline",
+            width=15
+        )
+        deselect_all_btn.pack(side="left", padx=5)
+        
+        # Send button
+        self.send_btn = ttk.Button(
+            button_frame,
+            text="🚀 Send Reports",
+            command=self.on_send,
+            bootstyle="success",
+            width=20
+        )
+        self.send_btn.pack(side="right", padx=5)
+        
+        # Cancel button
+        cancel_btn = ttk.Button(
+            button_frame,
+            text="Cancel",
+            command=self.root.quit,
+            bootstyle="danger-outline",
+            width=15
+        )
+        cancel_btn.pack(side="right", padx=5)
+    
+    def select_all(self):
+        """Select all email checkboxes"""
+        for var in self.email_vars.values():
+            var.set(True)
+        self.status_var.set(f"Selected all {len(self.email_vars)} recipients")
+    
+    def deselect_all(self):
+        """Deselect all email checkboxes"""
+        for var in self.email_vars.values():
+            var.set(False)
+        self.status_var.set("All recipients deselected")
+    
+    def on_send(self):
+        """Handle send button click"""
+        # Get selected emails
+        self.selected_emails = [email for email, var in self.email_vars.items() if var.get()]
+        
+        if not self.selected_emails:
+            messagebox.showwarning(
+                "No Recipients",
+                "Please select at least one recipient."
+            )
+            return
+        
+        # Confirm send
+        count = len(self.selected_emails)
+        confirm = messagebox.askyesno(
+            "Confirm Send",
+            f"Send reports to {count} recipient(s)?\n\n" + "\n".join(self.selected_emails)
+        )
+        
+        if confirm:
+            self.send_btn.config(state="disabled")
+            self.status_var.set("Processing reports...")
+            thread = threading.Thread(target=self.run_process)
+            thread.start()
+    
+    def run_process(self):
+        """Run the report processing in a separate thread"""
+        try:
+            main(to_emails=self.selected_emails, status_callback=self.status_callback)
+            self.root.after(0, lambda: messagebox.showinfo("Success", "Reports sent successfully!"))
+            self.root.after(100, self.root.quit)
+        except Exception as e:
+            self.root.after(0, lambda: messagebox.showerror("Error", f"An error occurred: {e}"))
+            self.root.after(0, lambda: self.send_btn.config(state="normal"))
+        finally:
+            self.root.after(0, lambda: self.status_var.set("Process complete"))
+    
+    def status_callback(self, message):
+        """Update status from background thread"""
+        self.root.after(100, lambda: self.status_var.set(message))
+    
+    def run(self):
+        """Start the UI"""
+        self.root.mainloop()
+        return self.selected_emails
 
 
 def send_email_with_attachments(gservice, to_emails, subject, body, attachment_folder):
@@ -283,9 +539,13 @@ def send_email_with_attachments(gservice, to_emails, subject, body, attachment_f
 
 
 # Main function
-def main():
+def main(to_emails=None, status_callback=None):
     """
     Main function to execute the script for multiple reports and send an email with the processed files.
+    
+    Args:
+        to_emails: List of email addresses to send to (optional)
+        status_callback: Function to call with status updates (optional)
     """
 
     # Clear directory before processing new reports
@@ -357,15 +617,17 @@ def main():
     # Folder to save processed files
     attachment_folder = SAVE_DIRECTORY
 
-    # Email details
-    to_emails = [#"aidan@tortintakeprofessionals.com",
-                #  "martin@tortintakeprofessionals.com",
-                #"ngaston@tortintakeprofessionals.com",
-                #  "oroman@tortintakeprofessionals.com", 
-                "esteban@tortintakeprofessionals.com" 
-                #  "brittany@tortintakeprofessionals.com", 
-                #  "jackson@tortintakeprofessionals.com"
-                 ]  # Add recipient emails
+    # Email details - use provided emails or defaults
+    if to_emails is None:
+        to_emails = [
+            "aidan@tortintakeprofessionals.com",
+            "martin@tortintakeprofessionals.com",
+            "ngaston@tortintakeprofessionals.com",
+            "oroman@tortintakeprofessionals.com",
+            "esteban@tortintakeprofessionals.com",
+            "brittany@tortintakeprofessionals.com",
+            "jackson@tortintakeprofessionals.com"
+        ]
     email_subject = "Cameron Flatirons Reports"
     email_body = (
         "Hello,\n\n"
@@ -375,8 +637,12 @@ def main():
     )
 
     # Process each report
-    for subject_filter in subject_filters:
-        print(f"Processing report for: {subject_filter}")
+    for idx, subject_filter in enumerate(subject_filters, 1):
+        status_msg = f"Processing report {idx}/{len(subject_filters)}: {subject_filter[:50]}..."
+        print(status_msg)
+        if status_callback:
+            status_callback(status_msg)
+        
         file_path = get_report_email(gservice, subject_filter)
         if file_path:
             try:
@@ -403,15 +669,45 @@ def main():
 
     # Send an email with all processed files
     try:
-        print("Sending email with attachments...")
+        status_msg = "Sending email with attachments..."
+        print(status_msg)
+        if status_callback:
+            status_callback(status_msg)
         send_email_with_attachments(gservice, to_emails, email_subject, email_body, attachment_folder)
     except Exception as e:
         print(f"Error sending email: {e}")
 
     print("All reports processed and email sent successfully.")
 
+def launch_ui():
+    """Launch the UI for email selection"""
+    # Available email addresses
+    available_emails = [
+        "aidan@tortintakeprofessionals.com",
+        "martin@tortintakeprofessionals.com",
+        "ngaston@tortintakeprofessionals.com",
+        "oroman@tortintakeprofessionals.com",
+        "esteban@tortintakeprofessionals.com",
+        "brittany@tortintakeprofessionals.com",
+        "jackson@tortintakeprofessionals.com"
+    ]
+    
+    # Subject filters for reports (preview - actual list is longer)
+    subject_filters = [
+        "Report: MFI: AFFF-PFAS Military Base Exposure - DL - Flatirons - Shield Legal",
+        "Report: MFI: Alameda County Juv Hall - DL - Flatirons - Shield Legal",
+        "Report: MFI: AZ YRTC - DL - Flatirons - Shield Legal",
+        # More reports configured in main()
+    ]
+    
+    # Create and run UI
+    ui = EmailSenderUI(available_emails, subject_filters)
+    ui.run()
+
+
 if __name__ == "__main__":
-    main()
+    # Launch UI instead of running directly
+    launch_ui()
 
 
 # if you get this error:

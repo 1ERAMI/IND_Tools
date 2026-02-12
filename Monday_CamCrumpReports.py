@@ -19,18 +19,37 @@ from base64 import urlsafe_b64decode
 from openpyxl import load_workbook
 from openpyxl.worksheet.table import Table, TableStyleInfo
 import win32com.client as win32
+import pythoncom
 import shutil
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 import tkinter.messagebox as messagebox
 from tkinter import StringVar, BooleanVar
 import threading
+from datetime import datetime, timedelta
 
 # win32.gencache.EnsureDispatch('Excel.Application')
 excel = win32.Dispatch('Excel.Application')
 gservice = RAGA.confirm_auth()
 
 SAVE_DIRECTORY = "C:\\Users\\Esteban\\Desktop\\Working\\Python Outputs\\Cameron\\Other"
+
+
+def get_target_date():
+    """
+    Get today's date if it's Monday, otherwise get the most recent Monday.
+    Returns date in YYYY/MM/DD format for Gmail query.
+    """
+    today = datetime.now().date()
+    weekday = today.weekday()  # 0 = Monday, 6 = Sunday
+
+    if weekday == 0:  # Today is Monday
+        target_date = today
+    else:  # Calculate most recent Monday
+        days_since_monday = weekday
+        target_date = today - timedelta(days=days_since_monday)
+
+    return target_date.strftime("%Y/%m/%d")
 
 
 def clear_save_directory(directory):
@@ -53,7 +72,9 @@ def sanitize_filename(filename):
 
 # Function to retrieve email and download the attachment
 def get_report_email(gservice, subject_filter):
-    query = f"subject:\"{subject_filter}\" is:unread"
+    target_date = get_target_date()
+    query = f"subject:\"{subject_filter}\" after:{target_date}"
+    print(f"Searching for emails after {target_date}")
     results = gservice.users().messages().list(userId="me", q=query).execute()
     messages = results.get("messages", [])
 
@@ -83,13 +104,6 @@ def get_report_email(gservice, subject_filter):
                     with open(file_path, "wb") as f:
                         f.write(file_data)
                     print(f"File downloaded: {file_path}")
-
-                    # Mark the email as read
-                    gservice.users().messages().modify(
-                        userId="me",
-                        id=message["id"],
-                        body={"removeLabelIds": ["UNREAD"]},
-                    ).execute()
                     return file_path
 
     print("No attachments found.")
@@ -169,47 +183,78 @@ def rename_sheet(file_path, old_name, new_name):
 
 # Create Excel pivot tables
 def create_multiple_pivot_tables(file_path, data_sheet_name, pivot_sheet_names):
+    excel = None
     try:
+        # Initialize COM for this thread
+        pythoncom.CoInitialize()
+
+        print(f"Starting pivot table creation for: {file_path}")
+        print(f"Data sheet: {data_sheet_name}")
+        print(f"Pivot sheets to create: {pivot_sheet_names}")
+
         excel = win32.gencache.EnsureDispatch("Excel.Application")
         excel.Visible = False
+        print("Excel application started")
+
         wb = excel.Workbooks.Open(os.path.abspath(file_path))
+        print(f"Workbook opened: {file_path}")
+
         data_sheet = wb.Worksheets(data_sheet_name)
+        print(f"Data sheet accessed: {data_sheet_name}")
 
         last_row = data_sheet.UsedRange.Rows.Count
         last_col = data_sheet.UsedRange.Columns.Count
+        print(f"Data range: {last_row} rows x {last_col} columns")
+
         data_range = data_sheet.Range(data_sheet.Cells(1, 1), data_sheet.Cells(last_row, last_col))
+        print("Data range defined")
 
         pivot_cache = wb.PivotCaches().Create(SourceType=1, SourceData=data_range)
+        print("Pivot cache created")
 
         for pivot_sheet_name in pivot_sheet_names:
+            print(f"Creating pivot sheet: {pivot_sheet_name}")
             pivot_sheet = wb.Sheets.Add()
             pivot_sheet.Name = pivot_sheet_name
+            print(f"Pivot sheet '{pivot_sheet_name}' added")
+
             pivot_table = pivot_cache.CreatePivotTable(
                 TableDestination=pivot_sheet.Cells(1, 1),
                 TableName=f"PivotTable_{pivot_sheet_name.replace(' ', '_')}",
             )
+            print(f"Pivot table created in '{pivot_sheet_name}'")
+
             status_field_row = pivot_table.PivotFields("Status")
             status_field_row.Orientation = 1
             status_field_row.Position = 1
+            print("Status field added to rows")
+
             status_field_value = pivot_table.PivotFields("Status")
             status_field_value.Orientation = 4
             status_field_value.Function = -4112  # xlCount
             status_field_value.Name = "Count of Status"
+            print("Status count field added to values")
 
         # Explicitly select only one sheet (deselect grouped sheets)
         wb.Worksheets(data_sheet_name).Activate()
         excel.ActiveWindow.View = 1  # xlNormalView
         excel.ActiveWindow.SelectedSheets(1).Select()
+        print("Sheets ungrouped, data sheet activated")
 
         wb.Save()
-        print("Pivot tables created successfully.")
+        print("✅ Pivot tables created and saved successfully!")
 
     except Exception as e:
-        print(f"Error creating pivot tables: {e}")
+        print(f"❌ ERROR creating pivot tables: {e}")
+        import traceback
+        traceback.print_exc()
 
     finally:
-        if "excel" in locals():
+        if excel is not None:
             excel.Quit()
+            print("Excel application closed")
+        # Uninitialize COM
+        pythoncom.CoUninitialize()
 
 # Format and reorder sheets
 def format_and_reorder_sheets(file_path, sheet_order):
@@ -219,7 +264,11 @@ def format_and_reorder_sheets(file_path, sheet_order):
     :param file_path: Path to the Excel file.
     :param sheet_order: List of sheet names in the desired order.
     """
+    excel = None
     try:
+        # Initialize COM for this thread
+        pythoncom.CoInitialize()
+
         excel = win32.gencache.EnsureDispatch("Excel.Application")
         excel.Visible = False
         print(f"Opening workbook for formatting and reordering: {file_path}")
@@ -260,8 +309,10 @@ def format_and_reorder_sheets(file_path, sheet_order):
     except Exception as e:
         print(f"Error during formatting and reordering: {e}")
     finally:
-        if "excel" in locals():
+        if excel is not None:
             excel.Quit()
+        # Uninitialize COM
+        pythoncom.CoUninitialize()
 
 
 class EmailSenderUI:
@@ -570,13 +621,13 @@ def main(to_emails=None, status_callback=None):
     # Email details - use provided emails or defaults
     if to_emails is None:
         to_emails = [
-            "aidan@tortintakeprofessionals.com",
-            "martin@tortintakeprofessionals.com",
-            "oroman@tortintakeprofessionals.com",
-            "pjerome@tortintakeprofessionals.com",
+            # "aidan@tortintakeprofessionals.com",
+            # "martin@tortintakeprofessionals.com",
+            # "oroman@tortintakeprofessionals.com",
+            # "pjerome@tortintakeprofessionals.com",
             "esteban@tortintakeprofessionals.com",
-            "brittany@tortintakeprofessionals.com",
-            "jackson@tortintakeprofessionals.com"
+            # "brittany@tortintakeprofessionals.com",
+            # "jackson@tortintakeprofessionals.com"
         ]
     email_subject = "Cameron & Crump's Reports"
     email_body = (

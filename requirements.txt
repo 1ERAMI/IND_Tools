@@ -1,0 +1,17 @@
+# CIR Monday Reports - Python Dependencies
+# Install with: pip install -r requirements.txt
+
+# Google API packages for Gmail integration
+google-auth-oauthlib==1.2.4
+google-auth-httplib2==0.3.0
+google-api-python-client==2.190.0
+
+# Data processing and Excel manipulation
+pandas==3.0.0
+openpyxl==3.1.5
+
+# Windows COM automation for Excel
+pywin32==311
+
+# Modern UI toolkit
+ttkbootstrap==1.20.1
