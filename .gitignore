@@ -1,5 +1,7 @@
 # OAuth tokens - DO NOT COMMIT
 token.pickle
+token_drive.pickle
+*.pickle
 
 # Python cache
 __pycache__/
@@ -22,3 +24,8 @@ Thumbs.db
 
 # Credentials
 credentials.json
+
+# Debug/temp scripts
+create_drive_folders.py
+create_shared_drive_folders.py
+debug_drive.py
