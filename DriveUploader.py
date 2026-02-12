@@ -6,10 +6,24 @@ Handles authentication and file uploads to Google Drive folders.
 import os
 import re
 import pickle
+import logging
+from datetime import datetime
 from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
+
+# Set up logging
+log_file = 'drive_uploads.log'
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(log_file),
+        logging.StreamHandler()  # Also log to console
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # Google Drive API scope
 SCOPES = ['https://www.googleapis.com/auth/drive']
@@ -39,8 +53,10 @@ def get_drive_service():
     # If no valid credentials, authenticate
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
+            logger.info("Refreshing expired Drive credentials")
             creds.refresh(Request())
         else:
+            logger.info("Initiating new Drive authentication")
             flow = InstalledAppFlow.from_client_secrets_file(
                 'credentials.json', SCOPES)
             creds = flow.run_local_server(port=0)
@@ -48,6 +64,7 @@ def get_drive_service():
         # Save credentials for future use
         with open(token_file, 'wb') as token:
             pickle.dump(creds, token)
+        logger.info("Drive credentials saved")
     
     return build('drive', 'v3', credentials=creds)
 
@@ -80,6 +97,7 @@ def get_or_create_date_subfolder(service, parent_folder_id, date_str):
     
     existing = results.get('files', [])
     if existing:
+        logger.info(f"Using existing date subfolder: {date_str} (ID: {existing[0]['id']})")
         return existing[0]['id']
     
     # Create the subfolder
@@ -94,7 +112,9 @@ def get_or_create_date_subfolder(service, parent_folder_id, date_str):
         supportsAllDrives=True
     ).execute()
     
-    return folder.get('id')
+    folder_id = folder.get('id')
+    logger.info(f"Created new date subfolder: {date_str} (ID: {folder_id})")
+    return folder_id
 
 
 def extract_date_from_filename(filename):
@@ -104,6 +124,15 @@ def extract_date_from_filename(filename):
     """
     match = re.search(r'(\d{4}-\d{2}-\d{2})', filename)
     return match.group(1) if match else None
+
+
+def format_file_size(bytes_size):
+    """Format bytes to human-readable size."""
+    for unit in ['B', 'KB', 'MB', 'GB']:
+        if bytes_size < 1024.0:
+            return f"{bytes_size:.1f} {unit}"
+        bytes_size /= 1024.0
+    return f"{bytes_size:.1f} TB"
 
 
 def find_existing_file(service, folder_id, filename):
@@ -136,15 +165,18 @@ def find_existing_file(service, folder_id, filename):
         ).execute()
         
         files = results.get('files', [])
+        if files:
+            logger.debug(f"Found existing file: {filename} (ID: {files[0]['id']})")
         return files[0]['id'] if files else None
     except Exception as e:
+        logger.warning(f"Could not check for existing file {filename}: {e}")
         print(f"Warning: Could not check for existing file: {e}")
         return None
 
 
 def upload_file_to_drive(file_path, folder_name, status_callback=None, target_folder_id=None):
     """
-    Upload a file to the specified Google Drive folder.
+    Upload a file to the specified Google Drive folder with progress tracking.
     
     Args:
         file_path: Local path to file to upload
@@ -155,48 +187,51 @@ def upload_file_to_drive(file_path, folder_name, status_callback=None, target_fo
     Returns:
         True if successful, False otherwise
     """
+    file_name = os.path.basename(file_path)
+    
     try:
         # Get folder ID
         folder_id = target_folder_id or DRIVE_FOLDERS.get(folder_name)
         if not folder_id or (isinstance(folder_id, str) and folder_id.startswith("REPLACE_WITH")):
             msg = f"❌ Drive folder not configured for '{folder_name}'. Please set folder ID in DriveUploader.py"
+            logger.error(f"Drive folder not configured: {folder_name}")
             print(msg)
             if status_callback:
                 status_callback(msg)
             return False
         
+        # Get file size for progress tracking
+        file_size = os.path.getsize(file_path)
+        file_size_str = format_file_size(file_size)
+        
         # Get Drive service
         service = get_drive_service()
-        
-        # File metadata
-        file_name = os.path.basename(file_path)
         
         # Check if file already exists in this folder
         existing_file_id = find_existing_file(service, folder_id, file_name)
         
-        media = MediaFileUpload(file_path, resumable=True)
+        # Use chunked upload for files > 5MB, simple upload for smaller files
+        chunksize = 5 * 1024 * 1024 if file_size > 5 * 1024 * 1024 else -1
+        media = MediaFileUpload(file_path, resumable=True, chunksize=chunksize)
         
         if existing_file_id:
             # Update existing file
-            msg = f"🔄 Updating existing file: {file_name}..."
+            msg = f"🔄 Updating existing file: {file_name} ({file_size_str})..."
+            logger.info(f"Updating existing file: {file_name} in folder {folder_name} (ID: {existing_file_id})")
             print(msg)
             if status_callback:
                 status_callback(msg)
             
-            uploaded_file = service.files().update(
+            request = service.files().update(
                 fileId=existing_file_id,
                 media_body=media,
                 fields='id, name, webViewLink',
                 supportsAllDrives=True
-            ).execute()
-            
-            msg = f"✅ Updated: {file_name} (ID: {uploaded_file.get('id')})"
-            print(msg)
-            if status_callback:
-                status_callback(msg)
+            )
         else:
             # Create new file
-            msg = f"📤 Uploading {file_name} to Drive..."
+            msg = f"📤 Uploading {file_name} ({file_size_str}) to Drive..."
+            logger.info(f"Uploading new file: {file_name} to folder {folder_name} ({file_size_str})")
             print(msg)
             if status_callback:
                 status_callback(msg)
@@ -206,23 +241,43 @@ def upload_file_to_drive(file_path, folder_name, status_callback=None, target_fo
                 'parents': [folder_id]
             }
             
-            uploaded_file = service.files().create(
+            request = service.files().create(
                 body=file_metadata,
                 media_body=media,
                 fields='id, name, webViewLink',
                 supportsAllDrives=True
-            ).execute()
-            
-            msg = f"✅ Uploaded: {file_name} (ID: {uploaded_file.get('id')})"
-            print(msg)
-            if status_callback:
-                status_callback(msg)
+            )
+        
+        # Execute upload with progress tracking for large files
+        response = None
+        last_progress = 0
+        
+        while response is None:
+            status, response = request.next_chunk()
+            if status:
+                progress = int(status.progress() * 100)
+                # Only update if progress changed by 10% or more (reduce noise)
+                if progress >= last_progress + 10:
+                    bytes_uploaded = int(status.progress() * file_size)
+                    progress_msg = f"   Progress: {progress}% ({format_file_size(bytes_uploaded)} / {file_size_str})"
+                    print(progress_msg)
+                    if status_callback:
+                        status_callback(progress_msg)
+                    last_progress = progress
+        
+        uploaded_file = response
+        action = "Updated" if existing_file_id else "Uploaded"
+        msg = f"✅ {action}: {file_name} (ID: {uploaded_file.get('id')})"
+        logger.info(f"{action} successfully: {file_name} (ID: {uploaded_file.get('id')})")
+        print(msg)
+        if status_callback:
+            status_callback(msg)
         
         return True
         
     except Exception as e:
-        file_name = os.path.basename(file_path)
         msg = f"❌ Error uploading {file_name} to Drive: {e}"
+        logger.error(f"Upload failed for {file_name}: {e}", exc_info=True)
         print(msg)
         if status_callback:
             status_callback(msg)
@@ -241,8 +296,11 @@ def upload_folder_to_drive(folder_path, folder_name, status_callback=None):
     Returns:
         Number of files successfully uploaded
     """
+    logger.info(f"Starting upload batch to '{folder_name}' from {folder_path}")
+    
     if not os.path.exists(folder_path):
         msg = f"❌ Folder not found: {folder_path}"
+        logger.error(f"Folder not found: {folder_path}")
         print(msg)
         if status_callback:
             status_callback(msg)
@@ -253,12 +311,14 @@ def upload_folder_to_drive(folder_path, folder_name, status_callback=None):
     
     if not xlsx_files:
         msg = f"ℹ️ No Excel files found in {folder_path}"
+        logger.info(f"No Excel files found in {folder_path}")
         print(msg)
         if status_callback:
             status_callback(msg)
         return 0
     
     msg = f"📂 Found {len(xlsx_files)} file(s) to upload to Drive"
+    logger.info(f"Found {len(xlsx_files)} Excel files to upload")
     print(msg)
     if status_callback:
         status_callback(msg)
@@ -267,6 +327,7 @@ def upload_folder_to_drive(folder_path, folder_name, status_callback=None):
     parent_folder_id = DRIVE_FOLDERS.get(folder_name)
     if not parent_folder_id:
         msg = f"❌ Drive folder not configured for '{folder_name}'"
+        logger.error(f"Drive folder not configured: {folder_name}")
         print(msg)
         if status_callback:
             status_callback(msg)
@@ -291,6 +352,7 @@ def upload_folder_to_drive(folder_path, folder_name, status_callback=None):
                 status_callback(msg)
         except Exception as e:
             msg = f"⚠️ Could not create date subfolder, uploading to main folder: {e}"
+            logger.warning(f"Could not create date subfolder: {e}")
             print(msg)
             if status_callback:
                 status_callback(msg)
@@ -315,9 +377,11 @@ def upload_folder_to_drive(folder_path, folder_name, status_callback=None):
                 else:
                     new_count += 1
         except Exception as e:
-            print(f"Error processing {xlsx_file}: {e}")
+            error_msg = f"Error processing {xlsx_file}: {e}"
+            logger.error(error_msg, exc_info=True)
+            print(error_msg)
             if status_callback:
-                status_callback(f"Error processing {xlsx_file}: {e}")
+                status_callback(error_msg)
     
     # Summary message
     summary_parts = []
@@ -328,6 +392,7 @@ def upload_folder_to_drive(folder_path, folder_name, status_callback=None):
     
     summary = " and ".join(summary_parts) if summary_parts else "0"
     msg = f"✅ Successfully uploaded {success_count}/{len(xlsx_files)} files ({summary})"
+    logger.info(f"Upload batch complete: {success_count}/{len(xlsx_files)} files - {summary}")
     print(msg)
     if status_callback:
         status_callback(msg)

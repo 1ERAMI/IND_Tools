@@ -29,3 +29,7 @@ credentials.json
 create_drive_folders.py
 create_shared_drive_folders.py
 debug_drive.py
+
+# Log files
+*.log
+drive_uploads.log
